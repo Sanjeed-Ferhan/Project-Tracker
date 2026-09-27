@@ -82,6 +82,9 @@
   .na-btn:hover{border-color:var(--sub);color:var(--navy);}
   .na-btn.on{background:var(--sub);border-color:var(--sub);color:#fff;}
   .steps-wrap{border:1px solid var(--line);border-radius:6px;overflow:hidden;}
+  .paste-wrap{margin-top:10px;border:1px dashed var(--line);border-radius:6px;padding:10px;background:#fafbfe;}
+  .paste-wrap textarea{min-height:74px;resize:vertical;}
+  .paste-tools{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px;}
   .steps-wrap table td{border-bottom:1px solid var(--line);}
   .setup li{margin-bottom:7px;line-height:1.5;font-size:12.5px;}
   .setup code{background:var(--bg);padding:1px 5px;border-radius:3px;font-size:11.5px;color:var(--navy);}
@@ -201,9 +204,22 @@
       <div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
         <div>
           <button class="btn light sm" id="dAddStep">＋ Add Step</button>
+          <button class="btn light sm" id="dPasteToggle">📋 Paste Steps</button>
           <span class="muted" style="margin-left:8px;">Tick = complete · N/A excludes a step from the denominator.</span>
         </div>
         <div class="muted" id="dStepSum"></div>
+      </div>
+
+      <div class="paste-wrap" id="dPasteWrap" style="display:none;">
+        <label class="f" style="margin-bottom:5px;">📋 Paste Steps <span style="text-transform:none;font-weight:400;color:var(--sub);">— one per line (weight optional)</span></label>
+        <textarea id="dPaste" placeholder="Root cause analysis | 25&#10;Countermeasure implementation, 35&#10;Verify &amp; standardise - 25"></textarea>
+        <div class="paste-tools">
+          <select id="dTemplate" style="max-width:230px;padding:5px 8px;font-size:11.5px;">
+            <option value="">— Load predefined template —</option>
+          </select>
+          <button class="btn" id="dPasteAdd">＋ Add Pasted Steps</button>
+          <button class="btn light sm" id="dPasteCancel">Cancel</button>
+        </div>
       </div>
     </div>
     <div class="mfoot">
@@ -244,6 +260,19 @@
       </div>
       <button class="btn light sm" id="cAddStep">＋ Add Step</button>
       <div class="muted" id="cWeightSum" style="margin-top:8px;"></div>
+
+      <div class="paste-wrap">
+        <label class="f" style="margin-bottom:5px;">📋 Paste Steps <span style="text-transform:none;font-weight:400;color:var(--sub);">— one per line. Weight optional, e.g. <code>Root cause analysis | 25</code></span></label>
+        <textarea id="cPaste" placeholder="1. Baseline data collection | 15&#10;Root cause analysis | 25&#10;Countermeasure implementation, 35&#10;Verify &amp; standardise - 25&#10;Weights are optional — omitted steps default to 1"></textarea>
+        <div class="paste-tools">
+          <select id="cTemplate" style="max-width:230px;padding:5px 8px;font-size:11.5px;">
+            <option value="">— Load predefined template —</option>
+          </select>
+          <button class="btn light sm" id="cPasteAdd">＋ Parse &amp; Add</button>
+          <button class="btn light sm" id="cPasteReplace">↻ Replace Steps</button>
+          <span class="muted">Tab / comma / “|” / “-” separates name and weight.</span>
+        </div>
+      </div>
     </div>
     <div class="mfoot">
       <span class="muted">Weights are relative; they are normalised to 100% automatically.</span>
@@ -320,6 +349,37 @@ const esc = (s='') => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;
 const num = v => { const n = parseFloat(v); return isFinite(n) && n > 0 ? n : 0; };
 const fmtDate = d => d ? d : '—';
 const today = () => new Date().toISOString().slice(0,10);
+
+/* ---------- paste / template helpers ---------- */
+const STEP_TEMPLATES = {
+  'OEE / Loss Improvement': ['Baseline OEE & loss data collection | 15','Root-cause analysis (Why-Why / fishbone) | 20','Countermeasure implementation | 35','Verify improvement & standardise | 30'],
+  '5S Implementation': ['Sort — red-tag & dispose | 20','Set in Order — locations & labels | 25','Shine — cleaning & inspection | 20','Standardize — visual standards | 20','Sustain — audit & discipline | 15'],
+  'Kaizen / IC Card': ['Problem definition & data | 15','Root-cause analysis | 20','Countermeasure & action plan | 25','Implementation | 25','Benefit verification & standardisation | 15'],
+  'Cost Reduction': ['Baseline cost & loss quantification | 15','Identify & prioritise opportunities | 20','Countermeasure implementation | 35','Verify savings & standardise | 30'],
+  'Capacity / Productivity': ['Demand & capacity analysis | 20','Bottleneck identification | 20','Improvement actions | 35','Verify output & standardise | 25'],
+  'New Product / Trial': ['Trial plan & protocol | 15','Material & line readiness | 20','Trial execution | 30','Quality verification | 20','Report & approval | 15'],
+  '5 Why / Root Cause': ['Problem statement & containment | 15','Data stratification & Pareto | 20','Why-Why to root cause | 25','Corrective action & verification | 25','Recurrence prevention / standardise | 15']
+};
+/* Parse pasted text (one step per line). Accepts optional weight after tab, comma, |, ; or a dash/colon. */
+function parseSteps(text){
+  const out = [];
+  String(text||'').split(/\r?\n/).forEach(raw => {
+    let line = (raw||'').trim();
+    if(!line) return;
+    line = line.replace(/^\s*(?:\d+[\.\)]|[-*•])\s+/, '');
+    let name = line, weight = 0;
+    let m = line.match(/^(.*?)[\t|;,]\s*([0-9]+(?:\.[0-9]+)?)\s*%?\s*$/);
+    if(!m) m = line.match(/^(.*?)\s+[-–—:]\s*([0-9]+(?:\.[0-9]+)?)\s*%?$/);
+    if(m){ name = m[1].trim(); weight = parseFloat(m[2]) || 0; }
+    name = name.replace(/[\t|;,]\s*$/,'').trim();
+    if(!name) return;
+    out.push({ name, weight });
+  });
+  return out;
+}
+function stepsFromPaste(text){
+  return parseSteps(text).map(s => ({ id: uid(), name: s.name, weight: s.weight || 1, done:false, link:'', remarks:'' }));
+}
 
 function toast(msg, kind=''){
   const t = $('#toast');
@@ -703,8 +763,36 @@ $('#projTb').addEventListener('click', e=>{
   const row = e.target.closest('.proj-row'); if(row) openDetail(row.dataset.id);
 });
 
+/* template dropdowns */
+$$('#cTemplate, #dTemplate').forEach(sel => {
+  Object.keys(STEP_TEMPLATES).forEach(k=>{
+    const o = document.createElement('option'); o.value = k; o.textContent = k; sel.appendChild(o);
+  });
+});
+function loadTemplateInto(sel, textarea){
+  const k = sel.value; if(k && STEP_TEMPLATES[k]) textarea.value = STEP_TEMPLATES[k].join('\n');
+  sel.value = '';
+}
+
 /* config modal */
 $('#cAddStep').onclick = ()=>{ configDraft.steps.push({ id:uid(), name:'', weight:1, done:false, link:'', remarks:'' }); renderConfigSteps(); };
+$('#cTemplate').onchange = ()=> loadTemplateInto($('#cTemplate'), $('#cPaste'));
+$('#cPasteAdd').onclick = ()=>{
+  const added = stepsFromPaste($('#cPaste').value);
+  if(!added.length){ toast('Nothing to add — paste one step per line', 'err'); return; }
+  configDraft.steps = configDraft.steps.filter(s => s.name || num(s.weight));
+  added.forEach(it => configDraft.steps.push(it));
+  $('#cPaste').value=''; renderConfigSteps();
+  toast('Added ' + added.length + ' step(s)', 'ok');
+};
+$('#cPasteReplace').onclick = ()=>{
+  const added = stepsFromPaste($('#cPaste').value);
+  if(!added.length){ toast('Nothing to paste', 'err'); return; }
+  if(!confirm('Replace all current steps with the ' + added.length + ' pasted step(s)?')) return;
+  configDraft.steps = added;
+  $('#cPaste').value=''; renderConfigSteps();
+  toast('Replaced with ' + added.length + ' step(s)', 'ok');
+};
 $('#cStepTb').addEventListener('input', e=>{
   const f = e.target.dataset.cf; if(!f) return;
   const i = +e.target.dataset.i;
@@ -731,6 +819,22 @@ $('#dAddStep').onclick = ()=>{
   p.steps = p.steps || [];
   p.steps.push({ id:uid(), name:'New step', weight:1, done:false, link:'', remarks:'' });
   renderDetail(); saveLocal();
+};
+$('#dPasteToggle').onclick = ()=>{
+  const w = $('#dPasteWrap'); w.style.display = w.style.display==='none' ? 'block' : 'none';
+  if(w.style.display==='block') $('#dPaste').focus();
+};
+$('#dPasteCancel').onclick = ()=>{ $('#dPasteWrap').style.display='none'; $('#dPaste').value=''; };
+$('#dTemplate').onchange = ()=> loadTemplateInto($('#dTemplate'), $('#dPaste'));
+$('#dPasteAdd').onclick = ()=>{
+  const p = DB.projects.find(x=>x.id===currentId); if(!p) return;
+  const added = stepsFromPaste($('#dPaste').value);
+  if(!added.length){ toast('Nothing to add — paste one step per line', 'err'); return; }
+  p.steps = p.steps || [];
+  added.forEach(it => p.steps.push(it));
+  $('#dPaste').value=''; $('#dPasteWrap').style.display='none';
+  renderDetail(); saveLocal();
+  toast('Added ' + added.length + ' step(s)', 'ok');
 };
 $('#stepTb').addEventListener('click', e=>{
   const p = DB.projects.find(x=>x.id===currentId); if(!p) return;
